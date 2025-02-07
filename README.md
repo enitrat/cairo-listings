@@ -70,12 +70,30 @@ The tool performs several checks based on file content and tags:
 
 ## Special Tags
 
-Files can include special tags at the top to control verification behavior:
+Files can include special tags at the top of Cairo files to control verification behavior. Tags should be placed in comments at the beginning of the file and can be combined using commas.
 
-- `DoesNotCompile`: Skip compilation checks
-- `DoesNotRun`: Skip execution checks
-- `FailingTests`: Skip test verification
-- `IgnoreFormat`: Skip format checks
+### Available Tags
+
+- `does_not_compile`: Indicates that the code is intentionally non-compilable. The verification tool will skip compilation checks.
+- `does_not_run`: Marks code that shouldn't be executed. The tool will skip runtime verification.
+- `ignore_fmt`: Excludes the file from formatting checks.
+- `tests_fail`: Indicates that the tests are expected to fail. The tool will skip test verification.
+
+### Tag Usage Example
+
+```cairo
+// does_not_compile, tests_fail
+fn example_function() {
+    // This code intentionally doesn't compile and has failing tests
+}
+```
+
+### Tag Combinations
+
+Multiple tags can be combined in a single line, separated by commas:
+```cairo
+// does_not_compile, ignore_fmt, tests_fail
+```
 
 ## Error Reporting
 

@@ -1,3 +1,4 @@
+use cairo_lang_parser::utils::SimpleParserDatabase;
 use clap::Parser;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -107,7 +108,7 @@ fn run_format(args: &VerifyArgs) {
     let args = Arc::new(args);
 
     scarb_packages.par_iter().for_each(|file| {
-        process_file_format(file, &args);
+        process_package_files_format(file, &args, false);
 
         if !args.quiet {
             let current = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
@@ -232,75 +233,100 @@ fn process_file(manifest_path: &str, args: &VerifyArgs) {
 
     // FORMAT CHECKS
     if !tags.contains(&Tags::IgnoreFormat) && !args.formats_skip {
-        // This program must pass cairo-format
-        let format_args = vec!["-c".to_string()];
-
-        let _ = run_command(
-            ScarbCmd::Format(),
-            manifest_path,
-            file_path,
-            format_args,
-            true,
-        );
+        process_package_files_format(manifest_path, args, true);
     }
 }
 
-fn process_file_format(manifest_path: &str, args: &VerifyArgs) {
-    let manifest_path_as_path = std::path::Path::new(manifest_path);
-    let file_path = manifest_path_as_path
-        .parent()
-        .unwrap()
-        .join("src/lib.cairo");
-    let file_path = file_path.to_str().unwrap();
-    let file = match File::open(file_path) {
-        Ok(f) => f,
-        Err(_) => {
-            println!(
-                "{}",
-                format!("Warning: Failed to open file {}", file_path).yellow()
-            );
-            return;
-        }
-    };
-    let reader = BufReader::new(file);
-
-    // Parsed tags (if any)
-    let mut tags: HashSet<Tags> = HashSet::new();
-    let mut in_tag_block = true;
-
-    reader.lines().for_each(|line| {
-        if let Ok(line_contents) = line {
-            // Parse tags
-            if in_tag_block && config::TAG_REGEX.is_match(&line_contents) {
-                let line_contents = config::TAG_REGEX.replace(&line_contents, "");
-                let tags_in_line: Vec<&str> = line_contents
-                    .trim()
-                    .split(',')
-                    .map(|tag| tag.trim())
-                    .collect();
-
-                tags_in_line.iter().for_each(|tag| {
-                    if let Some(tag_enum) = tags::Tags::from_str(tag) {
-                        tags.insert(tag_enum);
-                    }
-                });
-            } else {
-                // Stop parsing tags when we reach the first non-comment line
-                in_tag_block = false;
+fn collect_cairo_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_cairo_files(&path, files);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("cairo") {
+                files.push(path);
             }
         }
-    });
+    }
+}
 
-    // FORMAT CHECKS
-    if !tags.contains(&Tags::IgnoreFormat) && !args.formats_skip {
-        let format_args = vec![];
-        let _ = run_command(
-            ScarbCmd::Format(),
-            manifest_path,
-            file_path,
-            format_args,
-            true,
-        );
+
+/// Formats all .cairo files in the package
+/// # Arguments
+/// * `manifest_path`: The path to the manifest file
+/// * `args`: The arguments passed to the program
+/// * `check_only`: Whether to check only or format
+fn process_package_files_format(manifest_path: &str, args: &VerifyArgs, check_only: bool) {
+    let manifest_path_as_path = std::path::Path::new(manifest_path);
+    let base_dir = manifest_path_as_path
+        .parent()
+        .unwrap();
+
+    // Collect all .cairo files from src and tests directories
+    let mut cairo_files = Vec::new();
+    let src_dir = base_dir.join("src");
+    if src_dir.exists() {
+        collect_cairo_files(&src_dir, &mut cairo_files);
+    }
+    let tests_dir = base_dir.join("tests");
+    if tests_dir.exists() {
+        collect_cairo_files(&tests_dir, &mut cairo_files);
+    }
+
+    for file_path in cairo_files {
+        let file_path = file_path.to_str().unwrap();
+        let file = match File::open(file_path) {
+            Ok(f) => f,
+            Err(_) => {
+                println!(
+                    "{}",
+                    format!("Warning: Failed to open file {}", file_path).yellow()
+                );
+                return;
+            }
+        };
+
+        let reader = BufReader::new(file);
+
+        // Parsed tags (if any)
+        let mut tags: HashSet<Tags> = HashSet::new();
+        let mut in_tag_block = true;
+
+        reader.lines().for_each(|line| {
+            if let Ok(line_contents) = line {
+                // Parse tags
+                if in_tag_block && config::TAG_REGEX.is_match(&line_contents) {
+                    let line_contents = config::TAG_REGEX.replace(&line_contents, "");
+                    let tags_in_line: Vec<&str> = line_contents
+                        .trim()
+                        .split(',')
+                        .map(|tag| tag.trim())
+                        .collect();
+
+                    tags_in_line.iter().for_each(|tag| {
+                        if let Some(tag_enum) = tags::Tags::from_str(tag) {
+                            tags.insert(tag_enum);
+                        }
+                    });
+                } else {
+                    // Stop parsing tags when we reach the first non-comment line
+                    in_tag_block = false;
+                }
+            }
+        });
+
+        // FORMAT CHECKS
+        if !tags.contains(&Tags::IgnoreFormat) && !args.formats_skip {
+            let code = std::fs::read_to_string(file_path).unwrap();
+            let formatted_code = cairo_lang_formatter::format_string(&SimpleParserDatabase::default(), code.clone());
+            if check_only {
+                if code != formatted_code {
+                    handle_error(format!("{} is not formatted correctly", file_path), file_path, ScarbCmd::Format(), args.verbose);
+                }
+            } else {
+                std::fs::write(file_path, formatted_code).unwrap();
+            }
+        }
     }
 }
 
