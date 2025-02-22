@@ -61,6 +61,9 @@ fn process_file(manifest_path: &str) {
                 "scarb cairo-run" => ScarbCmd::CairoRun(),
                 "scarb test" | "scarb cairo-test" => ScarbCmd::Test(),
                 "scarb format" => ScarbCmd::Format(),
+                "scarb execute" => ScarbCmd::Execute(),
+                "scarb verify" => ScarbCmd::Verify(),
+                "scarb prove" => ScarbCmd::Prove(),
                 _ => {
                     eprintln!("Unknown command in {:?}: {}", output_file_path, command);
                     continue;

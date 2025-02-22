@@ -25,6 +25,9 @@ impl ErrorSets {
             ScarbCmd::Build() => &mut self.compile_errors,
             ScarbCmd::CairoRun() => &mut self.run_errors,
             ScarbCmd::Test() => &mut self.test_errors,
+            ScarbCmd::Execute() => &mut self.run_errors,
+            ScarbCmd::Verify() => &mut self.run_errors,
+            ScarbCmd::Prove() => &mut self.run_errors,
         }
     }
 }

@@ -11,6 +11,9 @@ pub enum ScarbCmd {
     Build(),
     CairoRun(),
     Test(),
+    Execute(),
+    Verify(),
+    Prove(),
 }
 
 impl ScarbCmd {
@@ -20,6 +23,9 @@ impl ScarbCmd {
             ScarbCmd::Build() => "build",
             ScarbCmd::CairoRun() => "cairo-run",
             ScarbCmd::Test() => "test",
+            ScarbCmd::Execute() => "execute",
+            ScarbCmd::Verify() => "verify",
+            ScarbCmd::Prove() => "prove",
         };
         command.into()
     }
@@ -34,6 +40,9 @@ impl ScarbCmd {
             ScarbCmd::Build() => vec![],
             ScarbCmd::CairoRun() => vec![],
             ScarbCmd::Test() => vec![],
+            ScarbCmd::Execute() => vec![],
+            ScarbCmd::Verify() => vec![],
+            ScarbCmd::Prove() => vec![],
         }
     }
 
