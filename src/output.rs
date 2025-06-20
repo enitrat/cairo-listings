@@ -79,6 +79,10 @@ fn process_file(manifest_path: &str) {
             let re2 = Regex::new(r"-->\s*.*?(listings/.*)").expect("Failed to create regex");
             output = re2.replace_all(&output, "--> $1").to_string();
 
+            // Remove the line that contains "Saving output to"
+            let re3 = Regex::new(r"Saving output to.*").expect("Failed to create regex");
+            output = re3.replace_all(&output, "").to_string();
+
             // Remove the `Blocking waiting for file lock on package cache` lines
             output = output
                 .lines()

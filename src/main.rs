@@ -140,8 +140,46 @@ fn run_format(args: &VerifyArgs) {
     }
 }
 
+fn get_executable_targets(manifest_path: &str) -> Vec<String> {
+    let manifest_path_as_path = std::path::Path::new(manifest_path);
+    let manifest_file = File::open(manifest_path_as_path).unwrap();
+    let manifest_reader = BufReader::new(manifest_file);
+    let manifest_contents = manifest_reader.lines().collect::<Result<Vec<String>, _>>().unwrap();
+
+    let mut executable_names = Vec::new();
+    let mut in_executable_section = false;
+
+    for line in manifest_contents {
+        let line = line.trim();
+
+        // Check if we're entering an executable section
+        if line == "[[target.executable]]" || line == "[executable]" {
+            in_executable_section = true;
+            continue;
+        }
+
+        // Check if we're leaving the section (entering a new section)
+        if line.starts_with('[') && in_executable_section {
+            in_executable_section = false;
+            continue;
+        }
+
+        // If we're in an executable section, look for the name
+        if in_executable_section && line.starts_with("name = ") {
+            if let Some(name) = line.strip_prefix("name = ") {
+                // Remove quotes if present
+                let name = name.trim_matches('"').trim_matches('\'');
+                executable_names.push(name.to_string());
+            }
+        }
+    }
+
+    executable_names
+}
+
 fn process_file(manifest_path: &str, args: &VerifyArgs) {
     let manifest_path_as_path = std::path::Path::new(manifest_path);
+    let executable_targets = get_executable_targets(manifest_path);
     let file_path = manifest_path_as_path
         .parent()
         .unwrap()
@@ -210,13 +248,26 @@ fn process_file(manifest_path: &str, args: &VerifyArgs) {
             && !tags.contains(&Tags::DoesNotCompile)
             && !args.run_skip
         {
-            run_command(
-                ScarbCmd::CairoRun(),
-                manifest_path,
-                file_path,
-                vec!["--available-gas=200000000".to_string()],
-                true,
-            );
+            if !executable_targets.is_empty() {
+                // Execute each executable target
+                for executable_name in &executable_targets {
+                    run_command(
+                        ScarbCmd::Execute(),
+                        manifest_path,
+                        file_path,
+                        vec!["--executable-name".to_string(), executable_name.clone()],
+                        true,
+                    );
+                }
+            } else {
+                run_command(
+                    ScarbCmd::CairoRun(),
+                    manifest_path,
+                    file_path,
+                    vec!["--available-gas=200000000".to_string()],
+                    true,
+                );
+            }
         }
     } else {
         // This is a cairo program, it must pass cairo-compile
