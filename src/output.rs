@@ -72,16 +72,19 @@ fn process_file(manifest_path: &str) {
 
             let mut output = run_command(cmd, manifest_path, manifest_path, args.clone(), false);
 
-            // Remove the part before "listings" after the first parenthesis using regex
-            let re = Regex::new(r"\(.*?(listings/.*)").expect("Failed to create regex");
-            output = re.replace_all(&output, "($1").to_string();
-
             let re2 = Regex::new(r"-->\s*.*?(listings/.*)").expect("Failed to create regex");
             output = re2.replace_all(&output, "--> $1").to_string();
 
             // Remove the line that contains "Saving output to"
             let re3 = Regex::new(r"Saving output to.*").expect("Failed to create regex");
             output = re3.replace_all(&output, "").to_string();
+
+            // Replace all the `<whatever_comes_here>/cairo-book/listings/` with `listings/`
+            let re4 = Regex::new(r"/(.*?)/cairo-book/listings/").expect("Failed to create regex");
+            output = re4.replace_all(&output, "listings/").to_string();
+
+            let re5 = Regex::new(r"Finished `dev` profile target\(s\) in .* second(s)?").expect("Failed to create regex");
+            output = re5.replace_all(&output, "Finished `dev` profile target(s) in 1 second").to_string();
 
             // Remove the `Blocking waiting for file lock on package cache` lines
             output = output
