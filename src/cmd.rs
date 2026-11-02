@@ -47,6 +47,17 @@ impl ScarbCmd {
     }
 
     pub fn test(&self, manifest_path: &str, args: Vec<String>) -> Result<Output, String> {
+        let output = self.run(manifest_path, args)?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stdout).into());
+        }
+        Ok(output)
+    }
+
+    /// Runs the command and returns its output whatever the exit status, so
+    /// callers can tell an expected failure (a listing that does not compile)
+    /// from a crash of the tool itself.
+    pub fn run(&self, manifest_path: &str, args: Vec<String>) -> Result<Output, String> {
         let manifest_dir = Path::new(manifest_path)
             .parent()
             .ok_or("Invalid manifest path")?;
@@ -62,13 +73,9 @@ impl ScarbCmd {
             .chain(args.iter().filter(|arg| !default_args.contains(arg)));
         command.args(all_args);
 
-        let output = command
+        command
             .output()
-            .map_err(|e| format!("Failed to execute scarb: {}", e))?;
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stdout).into());
-        }
-        Ok(output)
+            .map_err(|e| format!("Failed to execute scarb: {}", e))
     }
 
     fn get_scarb_path(&self, manifest_dir: &Path) -> Result<String, String> {

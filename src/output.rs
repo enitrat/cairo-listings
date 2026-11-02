@@ -2,18 +2,30 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
     path::PathBuf,
+    process::Output,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
+use colored::Colorize;
 use glob::glob;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use regex::Regex;
 
-use crate::{cmd::ScarbCmd, config::OutputArgs, run_command, utils::find_scarb_manifests};
+use crate::{cmd::ScarbCmd, config::OutputArgs, utils::find_scarb_manifests};
+
+/// Exit code of a Rust program that panicked.
+const PANIC_EXIT_CODE: i32 = 101;
+
+/// A command that crashed instead of producing an output, expected failure or not.
+struct Crash {
+    output_file: PathBuf,
+    command: String,
+    details: String,
+}
 
 pub fn process_outputs(arg: &OutputArgs) {
     let scarb_packages = find_scarb_manifests(arg.path.as_str());
@@ -28,9 +40,10 @@ pub fn process_outputs(arg: &OutputArgs) {
     );
 
     let processed_count = Arc::new(AtomicUsize::new(0));
+    let crashes = Mutex::new(Vec::new());
 
     scarb_packages.par_iter().for_each(|file| {
-        process_file(file);
+        process_file(file, &crashes);
 
         let current = processed_count.fetch_add(1, Ordering::SeqCst) + 1;
         pb.set_position(current as u64);
@@ -39,9 +52,58 @@ pub fn process_outputs(arg: &OutputArgs) {
             pb.finish_with_message("Output processing complete");
         }
     });
+
+    let crashes = crashes.into_inner().unwrap();
+    if !crashes.is_empty() {
+        report_crashes(&crashes);
+        std::process::exit(1);
+    }
 }
 
-fn process_file(manifest_path: &str) {
+/// Reads why a command failed, or `None` when its output can be written.
+///
+/// A non-zero exit is often the point of a listing: a program that does not
+/// compile or a test that fails. A panic or a signal never is.
+fn crash_details(result: &Result<Output, String>) -> Option<String> {
+    let output = match result {
+        Ok(output) => output,
+        Err(e) => return Some(e.clone()),
+    };
+    match output.status.code() {
+        Some(PANIC_EXIT_CODE) | None => Some(format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout).trim_end(),
+            String::from_utf8_lossy(&output.stderr).trim_end()
+        )),
+        Some(_) => None,
+    }
+}
+
+fn report_crashes(crashes: &[Crash]) {
+    for crash in crashes {
+        println!("\n{}", "=".repeat(80).red());
+        println!(
+            "{} running `{}` for {}",
+            "Crash".red().bold(),
+            crash.command.green(),
+            crash.output_file.display().to_string().blue().underline()
+        );
+        for line in crash.details.lines() {
+            println!("  {}", line);
+        }
+    }
+    println!(
+        "\n{}",
+        format!(
+            "{} command(s) crashed. Their output files were left unchanged.",
+            crashes.len()
+        )
+        .red()
+        .bold()
+    );
+}
+
+fn process_file(manifest_path: &str, crashes: &Mutex<Vec<Crash>>) {
     // Find all output*.txt files in the manifest directory
     let glob_pattern = PathBuf::from(manifest_path)
         .parent()
@@ -70,7 +132,16 @@ fn process_file(manifest_path: &str) {
                 }
             };
 
-            let mut output = run_command(cmd, manifest_path, manifest_path, args.clone(), false);
+            let result = cmd.run(manifest_path, args.clone());
+            if let Some(details) = crash_details(&result) {
+                crashes.lock().unwrap().push(Crash {
+                    output_file: output_file_path,
+                    command: format!("{} {}", command, args.join(" ")),
+                    details,
+                });
+                continue;
+            }
+            let mut output = String::from_utf8_lossy(&result.unwrap().stdout).into_owned();
 
             let re2 = Regex::new(r"-->\s*.*?(listings/.*)").expect("Failed to create regex");
             output = re2.replace_all(&output, "--> $1").to_string();
